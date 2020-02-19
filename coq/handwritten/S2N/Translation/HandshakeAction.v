@@ -24,16 +24,16 @@ Global Instance Embedding_HandshakeAction
       toAbstract :=
         fun '(a, (b, c)) =>
           {|
-            messageType := toAbstract a; (* Cryptol sorts the fields *)
-            recordType  := toAbstract b;
-            writer      := toAbstract c;
+            messageType := seq_to_BITS a; (* Cryptol sorts the fields *)
+            recordType  := seq_to_BITS b;
+            writer      := seq_to_BITS c;
           |}
       ;
       toConcrete :=
         fun c =>
-          ( toConcrete (messageType c)
-            , ( toConcrete (recordType c)
-                , toConcrete (writer c)
+          ( BITS_to_seq (messageType c)
+            , ( BITS_to_seq (recordType c)
+                , BITS_to_seq (writer c)
             )
           )
       ;

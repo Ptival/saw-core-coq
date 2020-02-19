@@ -168,3 +168,31 @@ Proof.
     reflexivity.
   }
 Qed.
+
+Theorem bvEq_eq n a b
+  : bvEq n a b = true ->
+    a = b.
+Proof.
+  rewrite /bvEq /vecEq.
+  move : n a b.
+  elim.
+  {
+    move => a.
+    apply : (Vector.case0 (A := Bool)).
+    move : a.
+    apply : (Vector.case0 (A := Bool)) => //.
+  }
+  {
+    move => n IH a b.
+    move : a b IH.
+    elim /Vector_caseS' => ha ta.
+    elim /Vector_caseS' => hb tb IH.
+    rewrite /=.
+    setoid_rewrite sawAt_S.
+    rewrite {1 2}/sawAt /=.
+    rewrite /SAWCoreScaffolding.and.
+    rewrite {1}/boolEq.
+    move /andP => [] /Bool.eqb_prop -> A.
+    rewrite (IH ta tb) //.
+  }
+Qed.

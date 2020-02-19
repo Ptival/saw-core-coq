@@ -1,11 +1,16 @@
 From Coq          Require Import Lists.List.
-Import ListNotations.
+From Coq          Require Import ssreflect.
 From Coq          Require Import String.
 From Coq          Require Import Vectors.Vector.
+
 From CryptolToCoq Require Import SAWCoreScaffolding.
-From Records      Require Import Records.
 From CryptolToCoq Require Import SAWCorePrelude.
+
+From Records      Require Import Records.
+
+Import ListNotations.
 Import SAWCorePrelude.
+Import VectorNotations.
 
 Fixpoint Nat_cases2_match a f1 f2 f3 (x y : nat) : a :=
   match (x, y) with
@@ -59,4 +64,29 @@ Proof.
     simpl.
     intuition.
   }
+Qed.
+
+(**
+I end up eliminating vectors of size 2 a lot.  This abstracts over the tedium of
+it.
+ *)
+Theorem elimVector2 (A : Type) (M : Vector.t A 2 -> Type)
+  : (forall h1 h2, M ([h1 ; h2])%vector) ->
+    forall v, M v.
+Proof.
+  move => IH v.
+  pose goal :=
+    fun n v =>
+      match n as n' return Vector.t A n' -> Type with
+      | 2 => fun v => M v
+      | _ => fun _ => Logic.True
+      end v.
+  cut (goal 2 v) => //.
+  have := eq_refl 2.
+  move : v.
+  move : {1 3 4} 2 => n2.
+  elim /@Vector.t_rect => // h1 n1 t _.
+  move : t.
+  elim /@Vector.t_rect => // h2 [] //.
+  apply : (Vector.case0 (A := A)) => _ _ //.
 Qed.

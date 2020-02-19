@@ -9,6 +9,10 @@ From CryptolToCoq Require Import SAWCoreVectorsAsCoqVectors.
 
 From Lift Require Import Handshake.
 
+From mathcomp Require Import seq.
+From mathcomp Require Import ssreflect.
+From mathcomp Require Import ssrnat.
+
 From Ornamental Require Import Ornaments.
 
 From S2N Require Import S2N.
@@ -22,7 +26,6 @@ Module Connection.
 
   (**
 This is what the original Cryptol [connection] type looked like:
-
 type connection = {handshake : handshake
                   ,mode : [32]
                   ,corked_io : [8]
@@ -33,110 +36,74 @@ type connection = {handshake : handshake
                   ,key_exchange_eph : Bit
                   ,client_auth_flag : Bit //whether the server will request client cert
                   }
-
    *)
   Definition connection :=
-    ((prod)
-       (* client_auth_flag *)
-       (@SAWCoreScaffolding.Bool)
+((prod)
+   (* client_auth_flag *)
+   (@SAWCoreScaffolding.Bool)
+   (((prod)
+       (* corked *)
+       (((@CryptolPrimitives.seq) (TCNum S2N.Opaque02) (@SAWCoreScaffolding.Bool)))
        (((prod)
-           (* corked *)
-           (((@CryptolPrimitives.seq) (((@TCNum) (2))) (@SAWCoreScaffolding.Bool)))
+           (* corked_io *)
+           (((@CryptolPrimitives.seq) (TCNum S2N.Opaque08) (@SAWCoreScaffolding.Bool)))
            (((prod)
-               (* corked_io *)
-               (((@CryptolPrimitives.seq) (((@TCNum) (8))) (@SAWCoreScaffolding.Bool)))
-               (((prod)
-                   Handshake.handshake
-                   (*((prod)
+               Handshake.handshake
+               (*((prod)
                        (((@CryptolPrimitives.seq) (((@TCNum) (32))) (@SAWCoreScaffolding.Bool)))
                        (((@CryptolPrimitives.seq) (((@TCNum) (32))) (@SAWCoreScaffolding.Bool))))*)
+               (((prod)
+                   (* is_caching_enabled *)
+                   (@SAWCoreScaffolding.Bool)
                    (((prod)
-                       (* is_caching_enabled *)
+                       (* key_exchange_eph *)
                        (@SAWCoreScaffolding.Bool)
                        (((prod)
-                           (* key_exchange_eph *)
-                           (@SAWCoreScaffolding.Bool)
+                           (* mode *)
+                           (((@CryptolPrimitives.seq) (TCNum S2N.Opaque32) (@SAWCoreScaffolding.Bool)))
                            (((prod)
-                               (* mode *)
-                               (((@CryptolPrimitives.seq) (((@TCNum) (32))) (@SAWCoreScaffolding.Bool)))
-                               (((prod)
-                                   (* resume_from_cache *)
-                                   (@SAWCoreScaffolding.Bool)
-                                   (* server_can_send_ocsp *)
-                                   (@SAWCoreScaffolding.Bool)))))))))))))))).
+                               (* resume_from_cache *)
+                               (@SAWCoreScaffolding.Bool)
+                               (* server_can_send_ocsp *)
+                               (@SAWCoreScaffolding.Bool)))))))))))))))).
 
   Record Connection :=
-    MkConnection
-      {
-        clientAuthFlag    : bool;
-        corked            : seq 2 bool;
-        corkedIO          : seq 8 bool;
-        handshake         : HandshakePP.Handshake;
-        isCachingEnabled  : bool;
-        keyExchangeEPH    : bool;
-        mode              : seq 32 bool;
-        resumeFromCache   : bool;
-        serverCanSendOCSP : bool;
-      }.
-
+MkConnection
+  {
+    clientAuthFlag    : bool;
+    corked            : seq 2 bool;
+    corkedIO          : seq 8 bool;
+    handshake         : HandshakePP.Handshake;
+    isCachingEnabled  : bool;
+    keyExchangeEPH    : bool;
+    mode              : seq 32 bool;
+    resumeFromCache   : bool;
+    serverCanSendOCSP : bool;
+  }.
   Scheme Induction for Connection Sort Prop.
   Scheme Induction for Connection Sort Type.
   Scheme Induction for Connection Sort Set.
 
   Definition get_client_auth_flag (c : connection) : bool :=
-    fst c.
-
+fst c.
   Definition get_corked (c : connection) : seq 2 bool :=
-    fst (snd c).
-
+fst (snd c).
   Definition get_corked_IO (c : connection) : seq 8 bool :=
-    fst (snd (snd c)).
-
+fst (snd (snd c)).
   Definition get_handshake (c : connection) : Handshake.handshake :=
-    fst (snd (snd (snd c))).
-
-  (* Definition get_is_caching_enabled (c : connection) : bool := *)
-  (*   fst (snd (snd (snd (snd c)))). *)
-
-  (* Definition get_key_exchange_EPH (c : connection) : bool := *)
-  (*   fst (snd (snd (snd (snd (snd c))))). *)
-
-  (* Definition get_mode (c : connection) : seq 32 bool := *)
-  (*   fst (snd (snd (snd (snd (snd (snd c)))))). *)
-
-  (* Definition get_resume_from_cache (c : connection) : bool := *)
-  (*   fst (snd (snd (snd (snd (snd (snd (snd c))))))). *)
-
-  (* Definition get_server_can_send_ocsp (c : connection) : bool := *)
-  (*   snd (snd (snd (snd (snd (snd (snd (snd c))))))). *)
+fst (snd (snd (snd c))).
+  Definition get_is_caching_enabled (c : connection) : bool :=
+fst (snd (snd (snd (snd c)))).
+  Definition get_key_exchange_EPH (c : connection) : bool :=
+fst (snd (snd (snd (snd (snd c))))).
+  Definition get_mode (c : connection) : seq 32 bool :=
+fst (snd (snd (snd (snd (snd (snd c)))))).
+  Definition get_resume_from_cache (c : connection) : bool :=
+fst (snd (snd (snd (snd (snd (snd (snd c))))))).
+  Definition get_server_can_send_ocsp (c : connection) : bool :=
+snd (snd (snd (snd (snd (snd (snd (snd c))))))).
 
 End Connection.
-
-Preprocess Module Connection
-  as ConnectionPP
-     { opaque
-         seq
-     }.
-
-Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.connection               as connectionPP.
-Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_client_auth_flag     as getClientAuthFlag0.
-Lift connectionPP ConnectionPP.Connection        in getClientAuthFlag0                    as getClientAuthFlag.
-Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_corked               as getCorked0.
-Lift connectionPP ConnectionPP.Connection        in getCorked0                            as getCorked.
-Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_corked_IO            as getCorkedIO0.
-Lift connectionPP ConnectionPP.Connection        in getCorkedIO0                          as getCorkedIO.
-Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_handshake            as getHandshake0.
-Lift connectionPP ConnectionPP.Connection        in getHandshake0                         as getHandshake.
-(* Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_is_caching_enabled   as getIsCachingEnabled0. *)
-(* Lift connectionPP ConnectionPP.Connection        in getIsCachingEnabled0                  as getIsCachingEnabled. *)
-(* Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_key_exchange_EPH     as getKeyExchangeEPH0. *)
-(* Lift connectionPP ConnectionPP.Connection        in getKeyExchangeEPH0                    as getKeyExchangeEPH. *)
-(* Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_mode                 as getMode0. *)
-(* Lift connectionPP ConnectionPP.Connection        in getMode0                              as getMode. *)
-(* Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_resume_from_cache    as getResumeFromCache0. *)
-(* Lift connectionPP ConnectionPP.Connection        in getResumeFromCache0                   as getResumeFromCache. *)
-(* Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_server_can_send_ocsp as getServerCanSendOCSP0. *)
-(* Lift connectionPP ConnectionPP.Connection        in getServerCanSendOCSP0                 as getServerCanSendOCSP. *)
 
 From Lift Require Import S2N.
 
@@ -198,7 +165,88 @@ Configure Lift
               S2N.handshakes_fn
               S2N.length
               S2N'.handshakes
+
+              S2N'.Opaque01
+              S2N'.Opaque02
+              S2N'.Opaque03
+              S2N'.Opaque04
+              S2N'.Opaque05
+              S2N'.Opaque06
+              S2N'.Opaque07
+              S2N'.Opaque08
+              S2N'.Opaque09
+              S2N'.Opaque10
+              S2N'.Opaque11
+              S2N'.Opaque12
+              S2N'.Opaque13
+              S2N'.Opaque14
+              S2N'.Opaque15
+              S2N'.Opaque16
+              S2N'.Opaque17
+              S2N'.Opaque18
+              S2N'.Opaque19
+              S2N'.Opaque20
+              S2N'.Opaque21
+              S2N'.Opaque22
+              S2N'.Opaque23
+              S2N'.Opaque24
+              S2N'.Opaque25
+              S2N'.Opaque26
+              S2N'.Opaque27
+              S2N'.Opaque28
+              S2N'.Opaque29
+              S2N'.Opaque30
+              S2N'.Opaque31
+              S2N'.Opaque32
+              S2N'.Opaque33
+              S2N'.Opaque34
+              S2N'.Opaque35
+              S2N'.Opaque36
+              S2N'.Opaque37
+              S2N'.Opaque38
+              S2N'.Opaque39
+              S2N'.Opaque40
+              S2N'.Opaque41
+              S2N'.Opaque42
+              S2N'.Opaque43
+              S2N'.Opaque44
+              S2N'.Opaque45
+              S2N'.Opaque46
+              S2N'.Opaque47
+              S2N'.Opaque48
+              S2N'.Opaque49
+              S2N'.Opaque50
+              S2N'.Opaque51
+              S2N'.Opaque52
+              S2N'.Opaque53
+              S2N'.Opaque54
+              S2N'.Opaque55
+              S2N'.Opaque56
+              S2N'.Opaque57
+              S2N'.Opaque58
+              S2N'.Opaque59
+              S2N'.Opaque60
+              S2N'.Opaque61
+              S2N'.Opaque62
+              S2N'.Opaque63
+              S2N'.Opaque64
+              S2N'.Opaque65
+              S2N'.Opaque66
+              S2N'.Opaque67
+              S2N'.Opaque68
+              S2N'.Opaque69
+
+              S2N'.Opaque83
+              S2N'.Opaque127
+              S2N'.Opaque128
           }.
+
+Preprocess Module Connection
+  as ConnectionPP
+       { opaque
+           seq
+       }.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.connection               as connectionPP.
 
 Configure Lift
           connectionPP ConnectionPP.Connection
@@ -257,7 +305,101 @@ Configure Lift
               S2N.handshakes_fn
               S2N.length
               S2N'.handshakes
+
+
+              S2N'.Opaque01
+              S2N'.Opaque02
+              S2N'.Opaque03
+              S2N'.Opaque04
+              S2N'.Opaque05
+              S2N'.Opaque06
+              S2N'.Opaque07
+              S2N'.Opaque08
+              S2N'.Opaque09
+              S2N'.Opaque10
+              S2N'.Opaque11
+              S2N'.Opaque12
+              S2N'.Opaque13
+              S2N'.Opaque14
+              S2N'.Opaque15
+              S2N'.Opaque16
+              S2N'.Opaque17
+              S2N'.Opaque18
+              S2N'.Opaque19
+              S2N'.Opaque20
+              S2N'.Opaque21
+              S2N'.Opaque22
+              S2N'.Opaque23
+              S2N'.Opaque24
+              S2N'.Opaque25
+              S2N'.Opaque26
+              S2N'.Opaque27
+              S2N'.Opaque28
+              S2N'.Opaque29
+              S2N'.Opaque30
+              S2N'.Opaque31
+              S2N'.Opaque32
+              S2N'.Opaque33
+              S2N'.Opaque34
+              S2N'.Opaque35
+              S2N'.Opaque36
+              S2N'.Opaque37
+              S2N'.Opaque38
+              S2N'.Opaque39
+              S2N'.Opaque40
+              S2N'.Opaque41
+              S2N'.Opaque42
+              S2N'.Opaque43
+              S2N'.Opaque44
+              S2N'.Opaque45
+              S2N'.Opaque46
+              S2N'.Opaque47
+              S2N'.Opaque48
+              S2N'.Opaque49
+              S2N'.Opaque50
+              S2N'.Opaque51
+              S2N'.Opaque52
+              S2N'.Opaque53
+              S2N'.Opaque54
+              S2N'.Opaque55
+              S2N'.Opaque56
+              S2N'.Opaque57
+              S2N'.Opaque58
+              S2N'.Opaque59
+              S2N'.Opaque60
+              S2N'.Opaque61
+              S2N'.Opaque62
+              S2N'.Opaque63
+              S2N'.Opaque64
+              S2N'.Opaque65
+              S2N'.Opaque66
+              S2N'.Opaque67
+              S2N'.Opaque68
+              S2N'.Opaque69
+
+              S2N'.Opaque83
+              S2N'.Opaque127
+              S2N'.Opaque128
           }.
+
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_client_auth_flag     as getClientAuthFlag0.
+Lift connectionPP ConnectionPP.Connection        in getClientAuthFlag0                    as getClientAuthFlag.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_corked               as getCorked0.
+Lift connectionPP ConnectionPP.Connection        in getCorked0                            as getCorked.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_corked_IO            as getCorkedIO0.
+Lift connectionPP ConnectionPP.Connection        in getCorkedIO0                          as getCorkedIO.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_handshake            as getHandshake0.
+Lift connectionPP ConnectionPP.Connection        in getHandshake0                         as getHandshake.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_is_caching_enabled   as getIsCachingEnabled0.
+Lift connectionPP ConnectionPP.Connection        in getIsCachingEnabled0                  as getIsCachingEnabled.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_key_exchange_EPH     as getKeyExchangeEPH0.
+Lift connectionPP ConnectionPP.Connection        in getKeyExchangeEPH0                    as getKeyExchangeEPH.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_mode                 as getMode0.
+Lift connectionPP ConnectionPP.Connection        in getMode0                              as getMode.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_resume_from_cache    as getResumeFromCache0.
+Lift connectionPP ConnectionPP.Connection        in getResumeFromCache0                   as getResumeFromCache.
+Lift HandshakePP.handshake HandshakePP.Handshake in ConnectionPP.get_server_can_send_ocsp as getServerCanSendOCSP0.
+Lift connectionPP ConnectionPP.Connection        in getServerCanSendOCSP0                 as getServerCanSendOCSP.
 
 (* Lift HandshakePP.handshake *)
 (*      HandshakePP.Handshake *)
@@ -284,7 +426,6 @@ Lift HandshakePP.handshake
   in S2N'.advance_message
   as advanceMessage0.
 
-(* This one does not terminate. *)
 Lift connectionPP ConnectionPP.Connection
   in advanceMessage0
   as advanceMessage.
@@ -307,3 +448,81 @@ Definition myConnection : ConnectionPP.Connection :=
     (false)
     (false)
 .
+
+Definition in_bounds_corked : forall (corked : seq 2 bool), Prop.
+  rewrite /seq /= /Vec => c.
+  have := (Logic.eq_refl 2).
+  move : c.
+  move : {1 2} 2.
+  case => //.
+  apply (caseS (fun n v => n.+1 = 2 -> _)).
+  move => b1 n1 _ _.
+  exact (b1 = false).
+Defined.
+
+Definition in_bounds_corked_connection (conn : ConnectionPP.Connection) : Prop :=
+  in_bounds_corked (ConnectionPP.corked conn).
+
+Theorem noDoubleCorkUncork_advanceMessage
+  : forall conn,
+    in_bounds_corked_connection conn ->
+    in_bounds_corked_connection (advanceMessage conn).
+Proof.
+  move => [? corked ? [??] ?????].
+  rewrite /in_bounds_corked_connection.
+  rewrite /in_bounds_corked.
+  rewrite /ConnectionPP.corked.
+  ConnectionPP.Connection_rect.
+
+
+
+  move : corked.
+  rewrite /ConnectionPP.CryptolToCoq_CryptolPrimitivesForSAWCoreExtra_natToNat.
+  apply (caseS (fun n v => _)).
+  move : n => _ b1 n1 _ _.
+  exact (b1 = false).
+Defined.
+
+
+
+
+  rewrite /caseS.
+  rewrite [advanceMessage]lock /= -lock.
+
+  rewrite
+    / ConnectionPP.clientAuthFlag
+    / ConnectionPP.corked
+    / ConnectionPP.corkedIO
+    / ConnectionPP.isCachingEnabled
+    / ConnectionPP.keyExchangeEPH
+    / ConnectionPP.mode
+    / ConnectionPP.resumeFromCache
+    / ConnectionPP.serverCanSendOCSP
+    /=
+  .
+
+  case A1 : (and _ _) => /=.
+  {
+    case E1 : (ecEq _ _ _ _) => /=.
+    {
+
+    }
+  }
+
+  rewrite /joinLSB /=.
+  rewrite /ecPlus /=.
+
+  cbv delta zeta iota.
+  simplConnection.
+  simplHandshake.
+  match goal with
+  | [ |- context [if ?c then _ else _] ] => case C1 : c
+  end.
+  {
+    match goal with
+    | [ |- context [if ?c then _ else _] ] => case C2 : c
+    end.
+    rewrite /s2nCork /=.
+    rewrite /thead / tnth /=.
+    move : c0 I => [] I -> //=.
+    {

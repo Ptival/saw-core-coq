@@ -43,18 +43,10 @@ Class ProperEmbedding {A B} `(Embedding A B) :=
     roundtrip : forall a, toConcrete (toAbstract a) = a;
   }.
 
-Global Instance Embedding_Bool
-  : Embedding Bool bool :=
-  {|
-    toAbstract := fun b => b;
-    toConcrete := fun b => b;
-  |}.
-
-Global Instance ProperEmbedding_Bool : ProperEmbedding Embedding_Bool.
-Proof.
-  constructor.
-  reflexivity.
-Defined.
+Class Isomorphism {A B} `(E : Embedding A B) `{! ProperEmbedding E} :=
+  {
+    roundtrip' : forall c, toAbstract (toConcrete c) = c;
+  }.
 
 Fixpoint seq_to_tuple {T} {n : nat} (s : seq n T) : n.-tuple T :=
   match s with
@@ -62,28 +54,115 @@ Fixpoint seq_to_tuple {T} {n : nat} (s : seq n T) : n.-tuple T :=
   | cons h _ t => cat_tuple [tuple of [:: h]] (seq_to_tuple t)
   end.
 
-Global Instance Embedding_seq_tuple A B (n : nat) `{Embedding A B}
-  : Embedding (seq n A) (n.-tuple B) :=
-  {|
-    toAbstract c := map_tuple toAbstract (seq_to_tuple c);
-    toConcrete b := genOrdinal _ _ (fun i => toConcrete (tnth b i));
-  |}.
+Theorem fromNat_bvToNat s v
+  : fromNat (bvToNat s v) = rev_tuple (seq_to_tuple v).
+Proof.
+  apply val_inj.
+  move : s v.
+  elim.
+  {
+    elim /(@Vector.case0 bool) => //.
+  }
+  {
+    move => s IH v.
+    move : v IH.
+    elim /@Vector.caseS => h s' t IH.
+    move : IH (IH t) => _.
+    rewrite [val (rev_tuple _)]/=.
+    rewrite [val (rev_tuple _)]/=.
+    rewrite rev_cons => <- .
+    rewrite bvToNat_S.
+    rewrite /hd /tl /caseS.
+    admit.
+    (*
+This is a bit of a pain to prove but should hold:
+- [h] is the bit of order s.+1, so it goes last
+- [bvToNat s' t] is [s'] bits so does not interfere
+     *)
+  }
+Admitted.
 
-Fixpoint bitvector_to_BITS {n : nat} (s : bitvector n) : BITS n :=
-  match s in Vector.t _ n' return n'.-tuple _ with
+(* Global Instance Embedding_seq_tuple A B (n : nat) `{Embedding A B} *)
+(*   : Embedding (seq n A) (n.-tuple B) := *)
+(*   {| *)
+(*     toAbstract c := map_tuple toAbstract (seq_to_tuple c); *)
+(*     toConcrete b := genOrdinal _ _ (fun i => toConcrete (tnth b i)); *)
+(*   |}. *)
+
+(**
+NOTE: while this is equivalent to [bvToBITS], it has different computational
+behaviour, that makes it easier to handle for certain proofs.
+ *)
+Fixpoint seq_to_BITS {s : nat} (v : seq s bool) : BITS s :=
+  match v in Vector.t _ s' return s'.-tuple _ with
   | nil => [tuple]
-  | cons h _ t => rcons_tuple (bitvector_to_BITS t) h
+  | cons h _ t => rcons_tuple (seq_to_BITS t) h
   end.
+
+Definition BITS_to_seq {s : nat} (b : BITS s)
+  : seq s bool
+  := genOrdinal _ _ (fun i => tnth b (rev_ord i)).
+
+Theorem BITS_to_seq_seq_to_BITS
+  : forall s (v : bitvector s),
+    BITS_to_seq (seq_to_BITS v) = v.
+Proof.
+
+Admitted.
+
+Theorem seq_to_BITS_BITS_to_seq
+  : forall s (t : s.-tuple bool),
+    seq_to_BITS (BITS_to_seq t) = t.
+Proof.
+
+Admitted.
+
+Theorem BITS_to_seq_is_bvNat_toNat
+  : forall s (v : BITS s),
+    BITS_to_seq v = bvNat s (toNat v).
+Proof.
+
+Admitted.
+
+Theorem seq_to_BITS_seq_to_tuple
+  : forall s (v : bitvector s),
+    seq_to_BITS v = rev_tuple (seq_to_tuple v).
+Proof.
+
+Admitted.
+
+Theorem seq_to_BITS_is_bvToBITS (s : nat) (v : seq s bool)
+  : seq_to_BITS v = bvToBITS v.
+Proof.
+  move : s v.
+  elim.
+  {
+    elim /(@Vector.case0 bool) => //.
+  }
+  {
+    move => s IH v.
+    move : v IH.
+    elim /@Vector.caseS => h s' t IH /=.
+    apply val_inj.
+    rewrite /bvToBITS.
+    rewrite IH.
+    rewrite fromNat_bvToNat /=.
+    rewrite rev_cons //.
+    f_equal.
+    rewrite /bvToBITS.
+    rewrite fromNat_bvToNat //.
+  }
+Qed.
 
 (* NOTE this is risky, Embedding_seq_tuple and Embedding_bitvector_BITS are
 overlapping and not compatible.
  *)
-Global Instance Embedding_bitvector_BITS (n : nat)
-  : Embedding (bitvector n) (BITS n) :=
-  {|
-    toAbstract c := map_tuple toAbstract (bitvector_to_BITS c);
-    toConcrete b := genOrdinal _ _ (fun i => toConcrete (tnth b (rev_ord i)));
-  |}.
+(* Global Instance Embedding_bitvector_BITS (n : nat) *)
+(*   : Embedding (bitvector n) (BITS n) := *)
+(*   {| *)
+(*     toAbstract c := map_tuple toAbstract (bitvector_to_BITS c); *)
+(*     toConcrete b := genOrdinal _ _ (fun i => toConcrete (tnth b (rev_ord i))); *)
+(*   |}. *)
 
 Theorem tnth_rshift {A n} (h : A) (t : n.-tuple A) (i : 'I_n)
   : tnth (cat_tuple [tuple h] t) (rshift 1 i) = tnth t i.
@@ -111,30 +190,98 @@ Proof.
   }
 Qed.
 
-Global Instance ProperEmbedding_seq_tuple A B n `{ProperEmbedding A B}
-       : ProperEmbedding (Embedding_seq_tuple A B n).
+(* Global Instance ProperEmbedding_seq_tuple A B n `{ProperEmbedding A B} *)
+(*        : ProperEmbedding (Embedding_seq_tuple A B n). *)
+(* Proof. *)
+(*   apply Build_ProperEmbedding. *)
+(*   move : n. *)
+(*   apply Vector.t_ind. *)
+(*   { *)
+(*     reflexivity. *)
+(*   } *)
+(*   { *)
+(*     move => h n t IH. *)
+(*     simpl. *)
+(*     f_equal. *)
+(*     { *)
+(*       apply roundtrip. *)
+(*     } *)
+(*     { *)
+(*       setoid_rewrite tnth_map. *)
+(*       setoid_rewrite roundtrip. *)
+(*       setoid_rewrite tnth_rshift. *)
+(*       apply genOrdinal_tnth_seq_to_tuple. *)
+(*     } *)
+(*   } *)
+(* Qed. *)
+
+Theorem map_tuple_seq_to_tuple
+  : forall A B n (f : A -> B) s,
+    map_tuple (n := n) f (seq_to_tuple s)
+    =
+    seq_to_tuple (map A B f n s).
 Proof.
-  apply Build_ProperEmbedding.
-  move : n.
-  apply Vector.t_ind.
-  {
-    reflexivity.
-  }
-  {
-    move => h n t IH.
-    simpl.
-    f_equal.
-    {
-      apply roundtrip.
-    }
-    {
-      setoid_rewrite tnth_map.
-      setoid_rewrite roundtrip.
-      setoid_rewrite tnth_rshift.
-      apply genOrdinal_tnth_seq_to_tuple.
-    }
-  }
+Admitted.
+
+Theorem seq_to_tuple_cons T n h (t : Vector.t T n)
+  : seq_to_tuple (h :: t) = [tuple of h :: (seq_to_tuple t)].
+Proof.
+Admitted.
+
+Theorem map_tuple_cons A B (f : A -> B) n h (t : n.-tuple A)
+  : map_tuple f [tuple of h :: t] = [tuple of f h :: (map_tuple f t)].
+Proof.
+Admitted.
+
+(**
+While this holds definitionally, it helps to have it as a means of unfolding
+just enough.
+ *)
+Theorem genOrdinal_S A s f
+  : genOrdinal s.+1 A f
+    =
+    (f (Ordinal (ltn0Sn s))) :: genOrdinal s A (fun i => f (rshift 1 i)).
+Proof.
+  rewrite //.
 Qed.
+
+From Coq Require Import Morphisms.
+
+Global Instance Proper_genOrdinal n a :
+    Proper (@pointwise_relation _ _ eq ==> eq) (@genOrdinal n a).
+Proof.
+Admitted.
+
+Theorem tnth_rshift' {A n} (t : (n.+1).-tuple A) (i : 'I_n)
+  : tnth t (rshift 1 i) = tnth [tuple of behead t] i.
+Proof.
+  move : t => [] [] //= h.
+  setoid_rewrite (tnth_nth h) => //.
+Qed.
+
+(* Global Instance Isomorphism_seq_tuple A B n `{Isomorphism A B} *)
+(*   : Isomorphism (Embedding_seq_tuple A B n). *)
+(* Proof. *)
+(*   constructor. *)
+(*   elim : n. *)
+(*   { *)
+(*     move => [] [] //= ?. *)
+(*     apply val_inj => //. *)
+(*   } *)
+(*   { *)
+(*     move => n IH t. *)
+(*     rewrite /toAbstract /toConcrete /Embedding_seq_tuple. *)
+(*     rewrite genOrdinal_S. *)
+(*     rewrite seq_to_tuple_cons. *)
+(*     rewrite map_tuple_cons. *)
+(*     move : t IH (IH [tuple of behead t]) => [] [] // h t ? _ IH. *)
+(*     apply val_inj => /=. *)
+(*     rewrite roundtrip'. *)
+(*     f_equal. *)
+(*     (* huh this is annoying... *) *)
+(*     admit. *)
+(*   } *)
+(* Admitted. *)
 
 Theorem map_tuple_id {A n} (t : n.-tuple A) : map_tuple Datatypes.id t = t.
 Proof.
@@ -270,8 +417,8 @@ Proof.
   setoid_rewrite nth_rev_tuple => //=.
 Qed.
 
-Theorem rev_tuple_bitvector_to_BITS {n} (v : bitvector n)
-  : rev_tuple (bitvector_to_BITS v) = seq_to_tuple v.
+Theorem rev_tuple_seq_to_BITS {n} (v : bitvector n)
+  : rev_tuple (seq_to_BITS v) = seq_to_tuple v.
 Proof.
   apply val_inj.
   rewrite / rev_tuple / rcons_tuple /=.
@@ -291,7 +438,7 @@ Qed.
 
 Lemma genOrdinal_tnth_bitvector_to_BITS
   : forall (n : nat) (v : bitvector n),
-    genOrdinal n bool (fun q : 'I_n => tnth (bitvector_to_BITS v) (rev_ord q)) = v.
+    genOrdinal n bool (fun q : 'I_n => tnth (seq_to_BITS v) (rev_ord q)) = v.
 Proof.
   apply Vector.t_ind => [|h n t IH] //=.
   {
@@ -313,33 +460,39 @@ Proof.
   }
 Qed.
 
-Global Instance ProperEmbedding_bitvector_BITS n
-  : ProperEmbedding (Embedding_bitvector_BITS n).
-Proof.
-  apply Build_ProperEmbedding.
-  move : n.
-  apply Vector.t_ind.
-  {
-    reflexivity.
-  }
-  {
-    move => h n t IH.
-    simpl.
-    f_equal.
-    {
-      rewrite map_tuple_id.
-      rewrite tnth_rcons_tuple_rev_ord0.
-      reflexivity.
-    }
-    {
-      setoid_rewrite tnth_map.
-      erewrite genOrdinal_domain_eq; [ apply genOrdinal_tnth_bitvector_to_BITS | ].
-      move => i /=.
-      rewrite tnth_rcons_tuple_rev_ord_rshift.
-      apply tnth_rev_tuple.
-    }
-  }
-Qed.
+(* Global Instance ProperEmbedding_bitvector_BITS n *)
+(*   : ProperEmbedding (Embedding_bitvector_BITS n). *)
+(* Proof. *)
+(*   apply Build_ProperEmbedding. *)
+(*   move : n. *)
+(*   apply Vector.t_ind. *)
+(*   { *)
+(*     reflexivity. *)
+(*   } *)
+(*   { *)
+(*     move => h n t IH. *)
+(*     simpl. *)
+(*     f_equal. *)
+(*     { *)
+(*       rewrite map_tuple_id. *)
+(*       rewrite tnth_rcons_tuple_rev_ord0. *)
+(*       reflexivity. *)
+(*     } *)
+(*     { *)
+(*       setoid_rewrite tnth_map. *)
+(*       erewrite genOrdinal_domain_eq; [ apply genOrdinal_tnth_bitvector_to_BITS | ]. *)
+(*       move => i /=. *)
+(*       rewrite tnth_rcons_tuple_rev_ord_rshift. *)
+(*       apply tnth_rev_tuple. *)
+(*     } *)
+(*   } *)
+(* Qed. *)
+
+(* Global Instance Isomorphism_bitvector_BITS n *)
+(*   : Isomorphism (Embedding_bitvector_BITS n). *)
+(* Proof. *)
+(*   constructor. *)
+(* Admitted. *)
 
 Global Instance Embedding_prod {A B C D} `{Embedding A B} `{Embedding C D}
   : Embedding (A * C) (B * D) :=

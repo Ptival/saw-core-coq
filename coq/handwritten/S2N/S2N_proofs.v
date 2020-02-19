@@ -1,5 +1,5 @@
 From Bits Require Import operations.
-From Bits Require Import properties.
+From Bits Require Import operations.properties.
 From Bits Require Import spec.
 
 From Coq Require Import Lists.List.
@@ -11,24 +11,32 @@ From Coq Require Import Vector.
 From CryptolToCoq Require Import CryptolPrimitivesForSAWCore.
 From CryptolToCoq Require Import CryptolPrimitivesForSAWCoreExtra.
 From CryptolToCoq Require Import SAWCorePrelude.
+From CryptolToCoq Require Import SAWCorePreludeExtra.
 From CryptolToCoq Require Import SAWCorePrelude_proofs.
 From CryptolToCoq Require Import SAWCoreScaffolding.
 From CryptolToCoq Require Import SAWCoreVectorsAsCoqVectors.
 
-From S2N Require Import Embedding.
-From S2N Require Import Pointed.
-From S2N Require Import S2N.
-From S2N Require Import Translation.Connection.
-From S2N Require Import Translation.Handshake.
-From S2N Require Import Translation.HandshakeAction.
+From S2N Require Import
+     CorrectTranslation
+     Embedding
+     Handshakes
+     Pointed
+     S2N
+     Translation.Connection
+     Translation.Handshake
+     Translation.HandshakeAction
+.
 
 From mathcomp Require Import eqtype.
 From mathcomp Require Import fintype.
 From mathcomp Require Import seq.
 From mathcomp Require Import ssreflect.
 From mathcomp Require Import ssrbool.
+From mathcomp Require Import ssrfun.
 From mathcomp Require Import ssrnat.
 From mathcomp Require Import tuple.
+
+Local Open Scope form_scope.
 
 Import CryptolPrimitives.
 Import ListNotations.
@@ -41,43 +49,43 @@ Notation "a || b" := (operations.orB a b).
 
 (** The function [conn_set_handshake_type] as we obtain it after translation is
 quite unreadable. *)
-Print conn_set_handshake_type.
+(* Print conn_set_handshake_type. *)
 
 (** Reasoning about it would get quite messy.  We can instead "copy" its
 original code and adapt it to work with [Connection]. *)
+Definition fullHandshake conn :=
+  if (isCachingEnabled conn && negb (resumeFromCache conn))%bool
+  then # 0
+  else seq_to_BITS FULL_HANDSHAKE.
+
+Definition perfectForwardSecrecy conn :=
+  if keyExchangeEPH conn
+  then seq_to_BITS PERFECT_FORWARD_SECRECY
+  else # 0.
+
+Definition ocspStatus conn :=
+  if serverCanSendOCSP conn
+  then seq_to_BITS OCSP_STATUS
+  else # 0.
+
+Definition clientAuth conn :=
+  if clientAuthFlag conn
+  then seq_to_BITS CLIENT_AUTH
+  else # 0.
+
+Definition handshakeType' conn :=
+  let fullHandshake := fullHandshake conn in
+  seq_to_BITS NEGOTIATED
+  || (fullHandshake
+     || if ~~ (fullHandshake  == #0)
+       then perfectForwardSecrecy conn || ocspStatus conn || clientAuth conn
+       else # 0
+    ).
+
 Definition connSetHandshakeType (conn : Connection) : Connection :=
-  let fullHandshake :=
-      if (isCachingEnabled conn && negb (resumeFromCache conn))%bool
-      then # 0
-      else toAbstract FULL_HANDSHAKE
-  in
-  let perfectForwardSecrecy :=
-      if keyExchangeEPH conn
-      then toAbstract PERFECT_FORWARD_SECRECY
-      else # 0
-  in
-  let ocspStatus :=
-      if serverCanSendOCSP conn
-      then toAbstract OCSP_STATUS
-      else # 0
-  in
-  let clientAuth :=
-      if clientAuthFlag conn
-      then toAbstract CLIENT_AUTH
-      else # 0
-  in
-  let handshakeType' :=
-      (
-        toAbstract NEGOTIATED
-        || (fullHandshake
-           || if ~~ (fullHandshake == #0)
-             then perfectForwardSecrecy || ocspStatus || clientAuth
-             else # 0
-          )
-      ) in
   let handshake' :=
       {|
-        handshakeType := handshakeType';
+        handshakeType := handshakeType' conn;
         messageNumber := messageNumber (handshake conn);
       |}
   in
@@ -95,14 +103,10 @@ Definition connSetHandshakeType (conn : Connection) : Connection :=
 
 Definition cry_handshakes := handshakes.
 
-Definition handshakes : 128.-tuple (32.-tuple (32.-tuple bool))
-  := toAbstract cry_handshakes.
-
-Definition cry_state_machine := state_machine.
-
-Definition state_machine
+Definition stateMachine
   : 17.-tuple HandshakeAction
-  := toAbstract cry_state_machine.
+  :=
+    map_tuple toAbstract (seq_to_tuple state_machine).
 
 Definition s2nCork (c : Connection) : 2.-tuple bool
   := incB (corked c).
@@ -121,63 +125,67 @@ Definition modeWriter (m : 32.-tuple bool) : 8.-tuple bool :=
   then ascii_C
   else ascii_S.
 
+Definition advanceMessage_handshake' conn :=
+  {|
+    handshakeType := handshakeType (handshake conn);
+    messageNumber := incB (messageNumber (handshake conn));
+  |}.
+
+Definition getHandshake num typ :=
+  (nth pointed
+       stateMachine
+       (toNat
+          (nth pointed
+               (nth pointed
+                    Handshakes.handshakes
+                    num
+               )
+               typ
+          )
+       )
+  ).
+
+Definition advanceMessage_activeState' conn :=
+  let handshake' := advanceMessage_handshake' conn in
+  getHandshake (toNat (messageNumber handshake'))
+               (toNat (handshakeType handshake')).
+
+Definition advanceMessage_previousState' conn :=
+  let handshake' := advanceMessage_handshake' conn in
+  getHandshake (toNat (messageNumber handshake') - 1)
+               (toNat (handshakeType handshake')).
+
+(**
+Factoring out the conditions helps in controlling the simplification in proofs.
+ *)
+
+Definition advanceMessage_corked'_cond1 conn :=
+  let activeState'   := advanceMessage_activeState' conn in
+  let previousState' := advanceMessage_previousState' conn in
+  (writer activeState' != writer previousState')
+  &&
+  (writer activeState' != ascii_A).
+
+Definition advanceMessage_corked'_cond2 conn :=
+  let activeState'   := advanceMessage_activeState' conn in
+  let previousState' := advanceMessage_previousState' conn in
+  writer activeState' == modeWriter (mode conn).
+
+Definition advanceMessage_corked' conn :=
+  if advanceMessage_corked'_cond1 conn
+  then
+    if advanceMessage_corked'_cond2 conn
+    then s2nCork conn
+    else s2nUncork conn
+  else corked conn.
+
 Definition advanceMessage (conn : Connection) : Connection :=
 
-  let handshake' :=
-      {|
-        handshakeType := handshakeType (handshake conn);
-        messageNumber := incB (messageNumber (handshake conn));
-      |}
-  in
-
-  let activeState' :=
-      (nth pointed
-         state_machine
-         (toNat
-            (nth pointed
-                 (nth pointed
-                      handshakes
-                      (toNat (messageNumber handshake'))
-                 )
-                 (toNat (handshakeType handshake'))
-            )
-         )
-      )
-  in
-
-  let previousState' :=
-      (nth pointed
-         state_machine
-         (toNat
-            (nth pointed
-                 (nth pointed
-                      handshakes
-                      (toNat (messageNumber handshake') - 1)
-                 )
-                 (toNat (handshakeType handshake'))
-            )
-         )
-      )
-  in
-
-  let corked' :=
-      if (
-          (writer activeState' != writer previousState')
-            &&
-            (writer activeState' != ascii_A)
-         )
-      then
-        if writer activeState' == modeWriter (mode conn)
-        then s2nCork conn
-        else s2nUncork conn
-      else corked conn
-  in
-
   {|
-    handshake         := handshake';
+    handshake         := advanceMessage_handshake' conn;
     mode              := mode conn;
     corkedIO          := corkedIO conn;
-    corked            := corked';
+    corked            := advanceMessage_corked' conn;
     isCachingEnabled  := isCachingEnabled  conn;
     resumeFromCache   := resumeFromCache   conn;
     serverCanSendOCSP := serverCanSendOCSP conn;
@@ -185,9 +193,11 @@ Definition advanceMessage (conn : Connection) : Connection :=
     clientAuthFlag    := clientAuthFlag    conn;
   |}.
 
+Local Open Scope form_scope.
+
 Lemma gen_getBit_shift
   : forall n h (t : n.-tuple bool),
-    gen n bool (fun n => getBit [tuple of h :: t] n.+1)
+    gen n bool (fun n => getBit ([ tuple of h :: t ]) n.+1)
     =
     gen n bool (fun n => getBit t n).
 Proof.
@@ -304,35 +314,6 @@ Lemma ubnPeq m : ubn_eq_spec m m.      Proof. by []. Qed.
 (*     reflexivity. *)
 (*   } *)
 (* Qed. *)
-
-Class CorrectTranslation
-      {CI AI CO AO}
-      `{ProperEmbedding CI AI}
-      `{ProperEmbedding CO AO}
-      (concreteFun : CI -> CO) (abstractFun : AI -> AO)
-  :=
-    {
-      correctTranslation :
-        forall ci ai co ao,
-          toAbstract ci = ai ->
-          concreteFun ci = co ->
-          abstractFun ai = ao ->
-          toAbstract co = ao;
-    }.
-
-Theorem byCorrectTranslation
-        {CI AI CO AO}
-        (concreteFun : CI -> CO) (abstractFun : AI -> AO)
-        `{CT : CorrectTranslation _ _ _ _ concreteFun abstractFun}
-  : forall ci, concreteFun ci = toConcrete (abstractFun (toAbstract ci)).
-Proof.
-  move => ci.
-  destruct CT as [CT].
-  specialize (CT ci _ _ _ (Logic.eq_refl _) (Logic.eq_refl) (Logic.eq_refl)).
-  apply f_equal with (f := toConcrete) in CT.
-  rewrite roundtrip in CT.
-  apply CT.
-Qed.
 
 Theorem unfold_ecOr n a b
   : ecOr (Vec n bool) (PLogicWord n) a b = bvOr n a b.
@@ -457,32 +438,11 @@ Proof.
   }
 Admitted.
 
-Ltac crunchTheNumbersStep :=
-  reflexivity
-
-  +
-
-  (* Try breaking boolean variables that block "if"s *)
-  match goal with
-  | [ |- context [ if ?b then _ else _ ] ] => is_var b; destruct b
-  end
-
-  +
-
-  (* Try breaking other boolean variables *)
-  match goal with
-  | [ b : Bool |- _ ] => destruct b
-  end
-
-.
-
-Ltac crunchTheNumbers := repeat crunchTheNumbersStep.
-
 Theorem t_for_n_equal_1 v :
   let n := 1 in
   ecPlus (Vec n bool) (PArithSeqBool n) v (ecNumber 1 (Vec n bool) (PLiteralSeqBool n))
   =
-  toConcrete (incB (seq_to_tuple v)).
+  BITS_to_seq (incB (seq_to_BITS v)).
 Proof.
   do 2 dependent destruction v.
   move : h.
@@ -490,7 +450,7 @@ Proof.
   {
     cbv -[bvAdd].
     rewrite / bvAdd /=.
-    rewrite toNat_addB.
+    rewrite properties.toNat_addB.
     cbv.
     reflexivity.
   }
@@ -503,41 +463,9 @@ Proof.
   }
 Qed.
 
-Theorem resolve_ecPlus_Vec n a b
-  : ecPlus (Vec n bool) (PArithSeqBool n) a b = bvAdd n a b.
-Proof.
-  reflexivity.
-Qed.
-
 Theorem half_toNat s (n : BITS s.+1) : (toNat n)./2 = toNat (droplsb n).
 Proof.
 Admitted.
-
-Theorem joinLSB_consL {n} h (t : bitvector n) x
-  : joinLSB (h :: t) x = h :: (joinLSB t x).
-Proof.
-  reflexivity.
-Qed.
-
-(** [bvNat] reduces innermost first, which is not convenient to do proofs
-against functions which produce head first.  This equality allows to produce a
-head first. *)
-Theorem bvNatS s n
-  : bvNat s.+1 n = odd (iter s half n) :: bvNat s n.
-Proof.
-  move : s n.
-  elim => [|s IH] n; [ rewrite //= | ].
-  rewrite (lock s.+1) /=.
-  unlock.
-  rewrite IH.
-  rewrite //=.
-  rewrite joinLSB_consL.
-  f_equal.
-  f_equal.
-  rewrite <- iterS.
-  rewrite -> iterSr.
-  reflexivity.
-Qed.
 
 Theorem tnth_rshift {A n} (t : n.+1.-tuple A) (i : 'I_n)
   : tnth t (rshift 1 i) = tnth (behead_tuple t) i.
@@ -552,140 +480,6 @@ Theorem rev_ord_rshift s n (i : 'I_s) (j : 'I_(n + s))
 Proof.
   move => E.
   apply val_inj => //.
-Qed.
-
-Lemma nth_fromNat_S (s : nat) (n : nat) (i : nat) def
-  : i < s ->
-    nth def (@fromNat (S s) n) i
-    =
-    nth def (@fromNat s n) i.
-Proof.
-  move : s i n.
-  elim => [|s IHs] i n I //=.
-  move : i I.
-  case => [| i] I //=.
-  rewrite IHs //=.
-Qed.
-
-Theorem odd_iter_half s n b
-  : b > s ->
-    odd (iter s half n) = nth false (@fromNat b n) s.
-Proof.
-  move : s n b.
-  elim => [|s IH] n b SB //=.
-  {
-    destruct b => //=.
-  }
-  {
-    destruct b => //=.
-    rewrite <- IH => //=.
-    rewrite <- iterS.
-    rewrite -> iterSr.
-    reflexivity.
-  }
-Qed.
-
-Theorem bvNat_genOrdinal size n
-  : bvNat size n = genOrdinal _ _ (fun i => tnth (fromNat n) (rev_ord i)).
-Proof.
-  move : size n.
-  elim => [|s IH] n; [ rewrite // | ].
-  rewrite bvNatS /=.
-  f_equal => //=.
-  {
-    move : IH => _.
-    rewrite (tnth_nth false).
-    rewrite <- properties.fromNatHalf => /=.
-    rewrite subn1 /=.
-    apply odd_iter_half => //=.
-  }
-  {
-    rewrite IH.
-    apply genOrdinal_domain_eq => i.
-    do ! rewrite (tnth_nth false).
-    rewrite nth_fromNat_S //=.
-    rewrite subSS.
-    apply rev_ord_proof.
-  }
-Qed.
-
-Theorem bvNat_toNat size (n : BITS size)
-  : bvNat size (toNat n) = genOrdinal _ _ (fun i => tnth n (rev_ord i)).
-Proof.
-  rewrite bvNat_genOrdinal.
-  rewrite properties.toNatK //.
-Qed.
-
-Definition bvToNat'Helper size (v : bitvector size) : (nat * nat) :=
-  Vector.fold_right (fun (b : bool) '(i, n) => (i.*2, n + b*i)) v (1, 0).
-
-Definition bvToNat' size (v : bitvector size) : nat :=
-  snd (bvToNat'Helper size v).
-
-Theorem fold_left_bvToNatFolder n h t
-  : fold_left bvToNatFolder h t = bvToNat n t + h * 2 ^ n.
-Proof.
-  move : n t h.
-  apply : Vector.t_ind => [| h' n t IH] n' //=.
-  {
-    rewrite add0n expn0 muln1 //.
-  }
-  {
-    do ! rewrite IH.
-    rewrite <- addnA.
-    f_equal.
-    rewrite / bvToNatFolder /=.
-    rewrite double0.
-    rewrite addn0.
-    rewrite mulnDl.
-    f_equal.
-    rewrite <- doubleMl.
-    rewrite doubleMr.
-    rewrite <- mul2n.
-    rewrite <- expnS.
-    reflexivity.
-  }
-Qed.
-
-Theorem bvToNat'Helper_bvToNat s v
-  : bvToNat'Helper s v = (2 ^ s, bvToNat s v).
-Proof.
-  move : s v.
-  apply : Vector.t_ind => //= h n t.
-  rewrite / bvToNat'Helper - / bvToNat'Helper /=.
-  move => ->.
-  rewrite <- muln2.
-  rewrite <- expnSr.
-  f_equal.
-  rewrite fold_left_bvToNatFolder.
-  f_equal.
-  rewrite / bvToNatFolder.
-  rewrite double0 addn0 //.
-Qed.
-
-Theorem bvToNat_bvToNat' s v
-  : bvToNat s v = bvToNat' s v.
-Proof.
-  rewrite / bvToNat'.
-  rewrite bvToNat'Helper_bvToNat //.
-Qed.
-
-Lemma bvToNatS
-  : forall n (v : bitvector n.+1),
-    bvToNat n.+1 v
-    =
-    (hd v * 2 ^ n) + (bvToNat n (tl v)).
-Proof.
-  apply : Vector.caseS => h n t.
-  rewrite / hd / tl / caseS.
-  rewrite bvToNat_bvToNat' //=.
-  rewrite / bvToNat'.
-  rewrite bvToNat'Helper_bvToNat /=.
-  rewrite fold_left_bvToNatFolder.
-  rewrite addnC.
-  f_equal.
-  rewrite / bvToNatFolder.
-  rewrite double0 addn0 //.
 Qed.
 
 (* Theorem fromNat_double n a *)
@@ -755,144 +549,354 @@ Proof.
   admit.
 Admitted.
 
-Theorem t v :
-  ecPlus (Vec 32 bool) (PArithSeqBool 32) v (ecNumber 1 (Vec 32 bool) (PLiteralSeqBool 32))
-  =
-  toConcrete (incB (seq_to_tuple v)).
+Theorem bvAdd_adcB (n : nat) (a b : seq n bool)
+  : bvAdd n a b
+    =
+    BITS_to_seq ((adcB false (seq_to_BITS a) (seq_to_BITS b)).2).
 Proof.
-  rewrite resolve_ecPlus_Vec.
-  do 33 dependent destruction v.
+Admitted.
+
+Theorem bitvector_to_BITS_bvNat s n
+  : seq_to_BITS (bvNat s n) = # n.
+Proof.
+  move : s n.
+  elim => // s IH n.
+  rewrite bvNatS.
+Admitted.
+
+Theorem ecPlus_1_is_incB n v
+  : ecPlus (Vec n bool) (PArithSeqBool n) v (ecNumber 1 (Vec n bool) (PLiteralSeqBool n))
+    =
+    BITS_to_seq (incB (seq_to_BITS v)).
+Proof.
+  rewrite ecPlus_is_bvAdd.
+  rewrite bvAdd_adcB.
+  rewrite [ecNumber _ _ _]/=.
   admit.
 Admitted.
 
-Global Instance
-       CorrectTranslation_connSetHandshakeType
-  : CorrectTranslation conn_set_handshake_type connSetHandshakeType.
+Theorem ecMinus_1_is_decB n v
+  : ecMinus (Vec n bool) (PArithSeqBool n) v (ecNumber 1 (Vec n bool) (PLiteralSeqBool n))
+    =
+    BITS_to_seq (decB (seq_to_BITS v)).
 Proof.
-  constructor.
-  move => ci.
-  repeat (match goal with [ a : _ * _ |- _ ] => destruct a end).
-  unfold conn_set_handshake_type.
-  cbv [fst snd Datatypes.fst Datatypes.snd].
-  move => ai co ao AI CO AO.
-  subst ai.
-  subst co.
-  subst ao.
-  unfold connSetHandshakeType.
-  simplConnection.
-  cbv [
-      toAbstract
-        Embedding_Connection
-        Embedding_Handshake
-        Embedding_seq_tuple
-        Embedding_Bool
-    ].
-  repeat setoid_rewrite map_tuple_id.
-  f_equal.
-  f_equal.
-  repeat rewrite seq_to_tuple_ecOr.
-  f_equal.
-  apply val_inj.
-  destruct b1, b3, b, b0, b2; reflexivity.
-Qed.
+Admitted.
 
-Global Instance
-       CorrectTranslation_advanceMessage
-  : CorrectTranslation advance_message advanceMessage.
+Definition conn_seq_handshake_type_as_connSetHandshakeType
+  : forall c,
+    conn_set_handshake_type c =
+    toConcrete (connSetHandshakeType (toAbstract c)).
 Proof.
-  constructor => ca.
-  repeat (match goal with [ a : _ * _ |- _ ] => destruct a end).
-  move => ai co ao AI CO AO.
-  subst ai.
-  subst co.
-  subst ao.
-  rewrite / advance_message.
+  move => [b0[?[?[[??][b1[b2[?[b3 b4]]]]]]]].
+  rewrite /conn_set_handshake_type.
   cbv [fst snd Datatypes.fst Datatypes.snd].
-  cbv [
-      toAbstract
-        Embedding_Connection
-        Embedding_Handshake
-        Embedding_seq_tuple
-        Embedding_Bool
-    ].
-  repeat rewrite map_tuple_id.
-  rewrite / advanceMessage.
+  rewrite /connSetHandshakeType.
+  rewrite /handshakeType'.
+  rewrite /fullHandshake /perfectForwardSecrecy /ocspStatus /clientAuth.
+  rewrite /toAbstract /Embedding_Connection.
   simplConnection.
   simplHandshake.
-  f_equal.
+  rewrite /toConcrete.
+  rewrite !BITS_to_seq_seq_to_BITS.
+  repeat f_equal.
+  move : b1 b3 b2 b4 b0 => [] [] [] [] [] //.
+Qed.
+
+Lemma s2n_cork_as_s2nCork
+  : forall s,
+    s2n_cork s = BITS_to_seq (s2nCork (toAbstract s)).
+Proof.
+
+Admitted.
+
+Theorem bvAt_nth
+        T (t : T) (sn si : nat) n i
+  : bvAt sn T si n i = nth t (seq_to_tuple n) (bvToNat _ i).
+Proof.
+
+Admitted.
+
+Definition nth_map_tuple
+           A B `{Pointed A} `{Pointed B}
+           (f : A -> B)
+           n (t : n.-tuple A)
+  : (map_tuple f t) [n] = f (t [n]).
+Proof.
+Admitted.
+
+Global Instance Pointed_bitvector
+       {n : nat}
+  : Pointed (seq n bool)
+  :=
+    {|
+      pointed := bvNat _ 0;
+    |}.
+
+Global Instance Pointed_seq
+       {n : nat} T `{Pointed T}
+  : Pointed (seq n T)
+  :=
+    {|
+      pointed := replicate n T pointed;
+    |}.
+
+Theorem stateMachine_indexing n : stateMachine [n] = toAbstract ((seq_to_tuple state_machine) [n]).
+Proof.
+  pose proof nth_map_tuple.
+  (* This is very annoying due to some unification issues. *)
+  (* It should hold from `nth_map_tuple`, but it does not. *)
+  admit.
+Admitted.
+
+Theorem ecAt_as_nth :
+  forall T `{Pointed T} (n : nat) (i : nat) (sn : seq n T) (si : seq i bool),
+    ecAt n T i sn si
+    =
+    (seq_to_tuple sn) [bvToNat _ si].
+Proof.
+  move => *.
+  rewrite !ecAt_is_bvAt.
+  erewrite !bvAt_nth.
+  reflexivity.
+Qed.
+
+Theorem as_getHandshake :
+  forall a b,
+    ecAt Opaque17 (seq Opaque08 Bool * (seq Opaque08 Bool * seq Opaque08 Bool)) Opaque32 state_machine
+         (ecAt Opaque32 (seq Opaque32 Bool) Opaque32
+               (ecAt Opaque128 (seq Opaque32 (seq Opaque32 Bool)) Opaque32 handshakes a)
+               b)
+    =
+    toConcrete (getHandshake (bvToNat _ b) (bvToNat _ a)).
+Proof.
+  move => a b.
+  rewrite !ecAt_as_nth.
+  rewrite /getHandshake.
+  rewrite stateMachine_indexing.
+  rewrite /Handshakes.handshakes.
+Admitted.
+
+Theorem bvToNat_BITS_to_seq
+        n (bits : BITS n)
+  : bvToNat n (BITS_to_seq bits) = toNat bits.
+Proof.
+
+Admitted.
+
+Theorem bvToNat_as_toNat_seq_to_BITS
+        n (v : bitvector n)
+  : bvToNat n v = toNat (seq_to_BITS v).
+Proof.
+Admitted.
+
+Theorem bvEq_BITS_to_seq
+        n (bits1 bits2 : BITS n)
+  : bvEq n (BITS_to_seq bits1) (BITS_to_seq bits2)
+    =
+    (bits1 == bits2).
+Proof.
+Admitted.
+
+(** TODO: this will most likely need some underflow logic *)
+Theorem toNat_decB
+        n (bits : BITS n)
+  : toNat (decB bits) = toNat bits - 1.
+Proof.
+Admitted.
+
+Lemma advance_message_as_advanceMessage
+  : forall conn,
+    advance_message conn = toConcrete (advanceMessage (toAbstract conn)).
+Proof.
+  moveConcreteConnection.
+
+  rewrite /advanceMessage.
+  rewrite /toConcrete /toAbstract /Embedding_Connection.
+  simplConnection.
+  simplHandshake.
+  rewrite !BITS_to_seq_seq_to_BITS.
+
+  rewrite /advance_message.
+  cbv [fst snd Datatypes.fst Datatypes.snd].
+
+  rewrite !as_getHandshake.
+  rewrite /toConcrete /Embedding_HandshakeAction.
+  rewrite !ecPlus_1_is_incB.
+  rewrite !ecMinus_1_is_decB.
+  rewrite !ecEq_is_bvEq.
+  rewrite !ecNotEq_is_not_bvEq.
+
+  rewrite /advanceMessage_corked'.
+  rewrite /advanceMessage_corked'_cond1.
+  rewrite /advanceMessage_activeState'.
+  rewrite /advanceMessage_previousState'.
+  rewrite /advanceMessage_handshake'.
+  simplConnection.
+  simplHandshake.
+
+  rewrite !bvToNat_BITS_to_seq.
+  rewrite !bvEq_BITS_to_seq.
+  rewrite !bvToNat_as_toNat_seq_to_BITS.
+  rewrite toNat_decB.
+  rewrite seq_to_BITS_BITS_to_seq.
+
+  case E1 : (writer _ == writer _).
+  => [X Y].
   {
-    destruct and eqn:A.
+    case W2 : (writer _).
+  }
+  rewrite !BITS_to_seq_seq_to_BITS.
+  repeat f_equal.
+
+  {
+
+    rewrite !ecEq_is_bvEq.
+    rewrite !ecNotEq_is_not_bvEq.
+
+
+
+    rewrite /advanceMessage_corked'.
+    simplConnection.
+    simplHandshake.
+
+    case E1 : (ecNotEq _ _ _ _).
+
     {
-      destruct (_ && _) eqn:B.
-      {
-        destruct ecEq eqn:C.
-        {
-          destruct (writer _ == modeWriter _) eqn:D.
-          {
-            admit.
-          }
-          {
-            (* C and D should agree *)
-            exfalso.
-            clear A B.
-            move : s3 C D.
-            unfold seq.
-            cbv [Num_rect].
-            admit.
-          }
-        }
-        {
-          admit.
-        }
-      }
+      case E1' : (advanceMessage_corked'_cond1 _).
+
       {
         admit.
       }
+
+      {
+        exfalso.
+        admit.
+      }
+
+    }
+
+    {
+      case E1' : (advanceMessage_corked'_cond1 _).
+
+      {
+        admit.
+      }
+
+      {
+        exfalso.
+        admit.
+      }
+
+    }
+
+    }
+
+  }
+
+
+      case E2 : (ecNotEq _ _ _ _).
+
+      {
+        case E3 : (ecEq _ _ _ _).
+
+        {
+          repeat f_equal.
+
+          {
+            rewrite /and.
+            rewrite s2n_cork_as_s2nCork.
+            rewrite /advanceMessage_corked'.
+            simplConnection.
+            rewrite /s2nCork.
+            reflexivity.
+            rewrite /s2n_cork.
+          }
+
+          rewrite /and.
+        }
+      }
+    }
+
+    repeat f_equal.
+    {
+      case A : (and _ _).
+
+
+      rewrite /advanceMessage_corked'
+              /advanceMessage_corked'_cond1
+              /advanceMessage_corked'_cond2
+              /advanceMessage_activeState'
+              /advanceMessage_handshake'
+      .
+      simplConnection.
+      simplHandshake.
+      simpl
+        admit.
     }
     {
-      admit.
+      rewrite /advanceMessage_handshake'.
+      simplConnection.
+      simplHandshake.
+      rewrite /toConcrete.
+      rewrite BITS_to_seq_seq_to_BITS.
+      f_equal.
+      rewrite ecPlus_1_is_incB //.
     }
-  }
-  {
-    admit.
-  }
 Admitted.
 
 (* The 2-bit vector must always be between 0 and 1.  In other terms, the bit of
 order 1 should always remain equal to 0. *)
 Definition in_bounds_corked : forall (corked : seq 2 bool), Prop.
-  rewrite / seq /= / Vec.
-  elim / @Vector.caseS => b1 _ _.
+  move N : 2 => n v.
+  move : n N v.
+  case => // n N v.
+  move : v N.
+  apply (caseS (fun n v => 2 = n.+1 -> _)).
+  move : n => _ b1 n1 _ _.
   exact (b1 = false).
 Defined.
 
-Definition in_bounds_corked_connection (conn : connection) : Prop :=
+Definition in_bounds_corked_connection (conn : cry_connection) : Prop :=
   in_bounds_corked (fst (snd conn)).
 
-Ltac destruct_connection :=
-  move =>
-  [ client_auth_flag
-      [ corked
-          [ corked_io
-              [ handshake
-                  [ is_caching_enabled
-                      [ key_exchange_eph
-                          [ mode
-                              [ resume_from_cache
-                                  server_can_send_ocsp
-                              ]
-                          ]
-                      ]
-                  ]
-              ]
-          ]
-      ]
-  ].
+Definition inBoundsCorked : forall (corked : BITS 2), Prop
+  := fun r =>
+       let (r, b0) := splitlsb r in
+       let (_, b1) := splitlsb r in
+       b1 = false.
 
-Definition inBoundsCorked : forall (corked : BITS 2), Prop.
-  case / tupleP => b1 _.
-  exact (b1 = false).
-Defined.
+Class CorrectTranslationProp
+      {CI AI}
+      `{ProperEmbedding CI AI}
+      (concreteProp : CI -> Prop) (abstractProp : AI -> Prop)
+  :=
+    {
+      correctTranslationProp :
+        forall ci ai,
+          toAbstract ci = ai ->
+          concreteProp ci <-> abstractProp ai;
+    }.
+
+Global Instance
+       CorrectTranslationProp_inBoundsCorked
+  : CorrectTranslationProp in_bounds_corked inBoundsCorked.
+Proof.
+  constructor.
+  move => ci ai H.
+  apply (f_equal (@toConcrete (seq (TCNum 2) bool) _ _)) in H.
+  move : H.
+  rewrite roundtrip => ->.
+  constructor.
+  {
+    destruct ai => //=.
+    rewrite / tnth /=.
+    destruct tval => //=.
+    destruct tval => //=.
+  }
+  {
+    move : ai => [] [|b0] // [|b1] //.
+  }
+Qed.
 
 Definition inBoundsCorkedConnection (conn : Connection) : Prop :=
   inBoundsCorked (corked conn).
@@ -909,16 +913,218 @@ Proof.
   apply IB.
 Qed.
 
+Definition UNCORKED : 2.-tuple bool := [tuple false; false].
+Definition   CORKED : 2.-tuple bool := [tuple true;  false].
+
+(*
+It helps to separate this from the whole invariant, so that the part of the
+proofs about [CorkedInvariant] can ignore all the other fields in [Connection].
+It also helps to delay the index as an equation, as as to be able to use
+[val_inj].
+ *)
+Inductive CorkedInvariant : 2.-tuple bool -> Prop :=
+| Corked   : forall c, c =   CORKED -> CorkedInvariant c
+| Uncorked : forall c, c = UNCORKED -> CorkedInvariant c
+.
+
+Inductive ConnectionInvariant : Connection -> Prop :=
+| MkConnectionInvariant :
+    forall conn,
+      CorkedInvariant (corked conn) ->
+      ConnectionInvariant conn
+.
+
+Theorem initial_connection_satisfies_Invariant
+  : forall conn,
+    initial_connection conn = true ->
+    ConnectionInvariant (toAbstract conn).
+Proof.
+  move => [a [corked b]].
+  move : corked.
+  elim /elimVector2 => c1 c2.
+  move : b => [?[[??][?[?[?[??]]]]]] /=.
+  repeat rewrite map_tuple_id.
+  rewrite /initial_connection /=.
+  rewrite /joinLSB /shiftin.
+  setoid_rewrite ecEq_is_bvEq.
+  case : (bvEq _ _ _) => //.
+  case : (bvEq _ _ _) => //.
+  case C : (bvEq _ _ _) => //.
+  {
+    move => _.
+    constructor => /=.
+    apply Uncorked.
+    move : C.
+    move /bvEq_eq => [] -> -> /=.
+    apply val_inj => //.
+  }
+  {
+    rewrite /=.
+    move /bvEq_eq => [] -> -> .
+    constructor => /=.
+    apply Corked.
+    apply val_inj => //.
+  }
+Qed.
+
+Definition activeMessage (c : Connection)
+  : 32.-tuple bool
+  :=
+    let handshake := handshake c in
+    nth pointed (nth pointed handshakes (toNat (handshakeType handshake)))
+        (toNat (messageNumber handshake)).
+
+Definition clientHello : 32.-tuple bool
+  := fromNat (intToNat (CLIENT_HELLO _ PLiteralInteger)).
+
+Definition serverHello : 32.-tuple bool
+  := fromNat (intToNat (SERVER_HELLO _ PLiteralInteger)).
+
+Definition s2nTransConnection_cond (c : Connection)
+  : bool
+  := (activeMessage c == clientHello)
+     ||
+     (activeMessage c == serverHello).
+
+Definition s2nTransConnection (c : Connection)
+  : Connection
+  :=
+    advanceMessage (
+        if s2nTransConnection_cond c
+        then connSetHandshakeType c
+        else c
+      ).
+
+
+Lemma s2nTrans_as_s2nTransConnection
+  : forall c,
+    s2nTrans c = toConcrete (s2nTransConnection (toAbstract c)).
+Proof.
+  move => conn.
+  rewrite /s2nTrans /s2nTransConnection.
+  case O : (boolOr _ _).
+  {
+    case C : (s2nTransConnection_cond _).
+    {
+      admit.
+    }
+    {
+      rewrite /=.
+      exfalso.
+      move : O.
+      rewrite /boolOr.
+      case E : (ecEq _ _ _).
+      {
+        move => _.
+        move : E.
+        rewrite /ACTIVE_MESSAGE.
+        rewrite /fst /snd.
+        rewrite /Datatypes.fst /Datatypes.snd.
+        rewrite /ecAt /Num_rect.
+        rewrite /bvAt /sawAt.
+      }
+
+      case : O.
+      move : O C.
+      rewrite /s2nTransConnection_cond.
+      rewrite /=.
+      (* TODO: show contradiction *)
+    }
+    rewrite !byCorrectTranslation.
+    rewrite roundtrip'.
+    rewrite /advanceMessage.
+    rewrite /connSetHandshakeType.
+    rewrite {1}/toConcrete /Embedding_Connection.
+    simplConnection.
+    rewrite /handshakeType'.
+    simplConnection.
+  }
+
+
+
+
+Qed.
+
+Theorem connSetHandshakeType_preserves_Invariant
+  : forall (conn : Connection),
+    ConnectionInvariant conn ->
+    ConnectionInvariant (connSetHandshakeType conn).
+Proof.
+  move => conn [] //.
+Qed.
+
+Theorem s2nTrans_preserves_Invariant
+  : forall (conn : cry_connection),
+    ConnectionInvariant (toAbstract conn) ->
+    ConnectionInvariant (toAbstract (s2nTrans conn)).
+Proof.
+  move => conn I.
+  rewrite byCorrectTranslation.
+  rewrite roundtrip'.
+  rewrite /s2nTransConnection.
+  case C : (s2nTransConnection_cond _) => //.
+  apply connSetHandshakeType_preserves_Invariant => //.
+Qed.
+
+(**
+We will later show that [s2nCork] is only called when [corked] is [00].
+ *)
+Theorem noDoubleCorkUncork_s2nCork
+  : forall conn,
+    corked conn = [tuple false; false] ->
+    inBoundsCorked (s2nCork conn).
+Proof.
+  move => [[handshakeType messageNumber]?? corked ?????].
+  move : corked => [] [|[]] // [|[]] // [] // I _.
+Qed.
+
+(**
+We will later show that [s2nUncork] is only called when [corked] is [10].
+ *)
+Theorem noDoubleCorkUncork_s2nUncork
+  : forall conn,
+    corked conn = [tuple true; false] ->
+    inBoundsCorked (s2nUncork conn).
+Proof.
+  move => [[handshakeType messageNumber]?? corked ?????].
+  move : corked => [] [|[]] // [|[]] // [] // I _.
+Qed.
+
 Theorem noDoubleCorkUncork_advanceMessage
   : forall conn,
+    ConnectionInvariant conn ->
     inBoundsCorkedConnection conn ->
-    inBoundsCorkedConnection (connSetHandshakeType conn).
+    inBoundsCorkedConnection (advanceMessage conn).
 Proof.
-  move => conn IB.
-  unfold connSetHandshakeType.
-  rewrite / inBoundsCorkedConnection.
-  simpl.
-  apply IB.
+  move => [[handshakeType messageNumber]?? corked ?????].
+  (* let's break down [corked], bit 1 must be [false] *)
+  move : corked => [] [|c0] // [|[]] // [] // ? INV I.
+  rewrite /inBoundsCorkedConnection.
+  rewrite /advanceMessage.
+  simplConnection.
+  rewrite /advanceMessage_corked'.
+  case C1 : (advanceMessage_corked'_cond1 _) => //.
+  case C2 : (advanceMessage_corked'_cond2 _).
+  {
+    apply noDoubleCorkUncork_s2nCork => //.
+    rewrite /corked.
+    move : C1 C2.
+    rewrite /advanceMessage_corked'_cond1.
+    admit.
+
+  }
+  {
+    apply noDoubleCorkUncork_s2nUncork => //.
+    admit.
+  }
+Admitted.
+
+Theorem corked_expansion
+  : forall (conn : Connection),
+    bitvector_to_BITS (fst (snd (toConcrete conn))) = corked conn.
+Proof.
+  apply : elimConnection => ? ? ? ? [] [] // ? [] // ? [] // ? ? ? ? ? ?.
+  apply val_inj => //=.
 Qed.
 
 Theorem noDoubleCorkUncork
@@ -926,48 +1132,33 @@ Theorem noDoubleCorkUncork
     in_bounds_corked_connection conn ->
     in_bounds_corked_connection (s2nTrans conn).
 Proof.
-  destruct_connection.
+  apply : elim_connection => ??????????.
   rewrite / in_bounds_corked_connection.
-  rewrite [s2nTrans]lock /= -lock => IB.
+  setoid_rewrite correctTranslationProp => //.
+  rewrite [s2nTrans]lock /= -lock.
+  setoid_rewrite map_tuple_id => IB.
   rewrite / s2nTrans.
+
+  rewrite byCorrectTranslation.
+  rewrite byCorrectTranslation.
+  rewrite corked_expansion.
+  apply noDoubleCorkUncork_advanceMessage.
+  apply noDoubleCorkUncork_connSetHandshakeType.
+  rewrite /inBoundsCorkedConnection.
+
   destruct boolOr eqn:D1.
   {
-    do ! rewrite byCorrectTranslation.
-    setoid_rewrite rewriteCorked.
-    rewrite / advanceMessage.
-    STOP.
-    rewrite [advanceMessage]lock.
-    rewrite [connSetHandshakeType]lock.
-    rewrite [toAbstract]lock.
-    rewrite [toConcrete]lock.
-
-
-    cbv -[toConcrete toAbstract].
-    rewrite /=.
-    rewrite / toConcrete / Embedding_Connection.
-    rewrite / toConcrete / Embedding_Handshake.
-    rewrite / Embedding_Bool.
-    rewrite /=.
+    rewrite roundtrip'.
+    apply noDoubleCorkUncork_connSetHandshakeType.
+    rewrite /inBoundsCorkedConnection.
+    rewrite [toAbstract _]/=.
+    simplConnection.
+    rewrite map_tuple_id //.
+  }
+  {
+    rewrite /inBoundsCorkedConnection.
+    rewrite [toAbstract _]/=.
+    simplConnection.
+    rewrite map_tuple_id //.
   }
 Qed.
-
-Definition s2nTrans (conn : ((prod) (@SAWCoreScaffolding.Bool) (((prod)
-                                                                   (((@CryptolPrimitives.seq) (((@TCNum) (2))) (@SAWCoreScaffolding.Bool)))
-                                                                   (((prod) (((@CryptolPrimitives.seq) (((@TCNum) (8)))
-                                                                                                       (@SAWCoreScaffolding.Bool))) (((prod) (((prod) (((@CryptolPrimitives.seq)
-                                                                                                                                                          (((@TCNum) (32))) (@SAWCoreScaffolding.Bool))) (((@CryptolPrimitives.seq)
-                                                                                                                                                                                                             (((@TCNum) (32))) (@SAWCoreScaffolding.Bool))))) (((prod)
-                                                                                                                                                                                                                                                                  (@SAWCoreScaffolding.Bool) (((prod) (@SAWCoreScaffolding.Bool) (((prod)
-                                                                                                                                                                                                                                                                                                                                     (((@CryptolPrimitives.seq) (((@TCNum) (32))) (@SAWCoreScaffolding.Bool)))
-                                                                                                                                                                                                                                                                                                                                     (((prod) (@SAWCoreScaffolding.Bool) (@SAWCoreScaffolding.Bool)))))))))))))))))
-  := ((advance_message) (if ((orB) (((@CryptolPrimitives.ecEq)
-                                       (((@CryptolPrimitives.seq) (((@TCNum) (32))) (@SAWCoreScaffolding.Bool)))
-                                       (((@CryptolPrimitives.PCmpSeqBool) (((@TCNum) (32))))) (((ACTIVE_MESSAGE)
-                                                                                                  (conn))) (((CLIENT_HELLO) (((@CryptolPrimitives.seq) (((@TCNum) (32)))
-                                                                                                                                                       (@SAWCoreScaffolding.Bool))) (((@CryptolPrimitives.PLiteralSeqBool) (((@TCNum)
-                                                                                                                                                                                                                               (32))))))))) (((@CryptolPrimitives.ecEq) (((@CryptolPrimitives.seq) (((@TCNum)
-                                                                                                                                                                                                                                                                                                       (32))) (@SAWCoreScaffolding.Bool))) (((@CryptolPrimitives.PCmpSeqBool)
-                                                                                                                                                                                                                                                                                                                                               (((@TCNum) (32))))) (((ACTIVE_MESSAGE) (conn))) (((SERVER_HELLO)
-                                                                                                                                                                                                                                                                                                                                                                                                   (((@CryptolPrimitives.seq) (((@TCNum) (32))) (@SAWCoreScaffolding.Bool)))
-                                                                                                                                                                                                                                                                                                                                                                                                   (((@CryptolPrimitives.PLiteralSeqBool) (((@TCNum) (32)))))))))) then
-                           ((conn_set_handshake_type) (conn)) else conn)).
