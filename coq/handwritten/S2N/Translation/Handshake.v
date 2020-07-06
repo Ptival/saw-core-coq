@@ -8,7 +8,7 @@ From mathcomp Require Import tuple.
 
 Import CryptolPrimitives.
 
-Definition cry_handshake : Type
+Definition handshake : Type
   := (seq 32 bool * seq 32 bool).
 
 Record Handshake := MkHandshake
@@ -18,7 +18,7 @@ Record Handshake := MkHandshake
   }.
 
 Global Instance Embedding_Handshake
-    : Embedding cry_handshake Handshake :=
+    : Embedding handshake Handshake :=
     {|
       toAbstract :=
         fun '(a, b) =>

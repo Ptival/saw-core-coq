@@ -9,11 +9,11 @@ From mathcomp Require Import tuple.
 
 Import CryptolPrimitives.
 
-Definition cry_connection : Type
+Definition connection : Type
   := (bool (* client_auth_flag *)
       * (seq 2 bool (* corked *)
          * (seq 8 bool (* corked_io *)
-            * (cry_handshake
+            * (handshake
                * (bool (* is_caching_enabled *)
                   * (bool (* key_exchange_eph *)
                      * (seq 32 bool (* mode *)
@@ -43,7 +43,7 @@ Record Connection         := MkConnection
 }.
 
 Global Instance Embedding_Connection
-  : Embedding cry_connection Connection :=
+  : Embedding connection Connection :=
   {|
     toAbstract :=
       fun '(a, (b, (c, (d, (e, (f, (g, (h, i)))))))) =>

@@ -1,6 +1,6 @@
 -Q generated/CryptolToCoq   CryptolToCoq
 -Q handwritten/CryptolToCoq CryptolToCoq
--Q handwritten/Lift         Lift
+-R handwritten/Lift         Lift
 -Q generated/S2N            S2N
 -Q handwritten/S2N          S2N
 
@@ -20,12 +20,13 @@ handwritten/CryptolToCoq/SAWCoreVectorsAsCoqVectors.v
 # generated/BESSPIN/SBB_Invariants.v
 # handwritten/BESSPIN/SBB_Scaffolding.v
 
-handwritten/Lift/Connection.v
-handwritten/Lift/Handshake.v
-# handwritten/Lift/HandshakeAction.v
-# handwritten/Lift/Minimal.v
-handwritten/Lift/SAWCorePrelude.v
-handwritten/Lift/S2N.v
+handwritten/Lift/Lift/ConnectionLift.v
+handwritten/Lift/Lift/ConnectionLift.v
+handwritten/Lift/Lift/HandshakeLift.v
+handwritten/Lift/Lift/HandshakeLift.v
+handwritten/Lift/Preprocess/ConnectionPP.v
+handwritten/Lift/Preprocess/HandshakePP.v
+handwritten/Lift/Preprocess/S2NPP.v
 
 generated/S2N/S2N.v
 handwritten/S2N/S2N_proofs.v
