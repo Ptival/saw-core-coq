@@ -43,3 +43,7 @@ Set DEVOID lift type. (* <-- Prettier types than the ones Coq infers *)
 Set Preprocess default opaque.
 
 Preprocess Module Handshake as HandshakePP.
+
+Print HandshakePP.handshake.
+
+Print HandshakePP.Handshake.

@@ -13,33 +13,41 @@ Definition handshake : Type
 
 Record Handshake := MkHandshake
   {
-    handshakeType : 32.-tuple bool;
-    messageNumber : 32.-tuple bool;
+    handshakeType : seq 32 bool;
+    messageNumber : seq 32 bool;
+
+    (* should be: *)
+    (* handshakeType : 32.-tuple bool; *)
+    (* messageNumber : 32.-tuple bool; *)
   }.
 
-Global Instance Embedding_Handshake
-    : Embedding handshake Handshake :=
-    {|
-      toAbstract :=
-        fun '(a, b) =>
-          {|
-            handshakeType := toAbstract a; (* Cryptol sorts the fields *)
-            messageNumber := toAbstract b;
-          |}
-      ;
-      toConcrete :=
-        fun c =>
-          ( toConcrete (handshakeType c)
-            , toConcrete (messageNumber c)
-          )
-      ;
-    |}.
+Scheme Induction for Handshake Sort Prop. 
+Scheme Induction for Handshake Sort Set. 
+Scheme Induction for Handshake Sort Type. 
 
-Global Instance Pointed_Handshake : Pointed Handshake :=
-  {|
-    pointed :=
-      {|
-        handshakeType := pointed;
-        messageNumber := pointed;
-      |};
-  |}.
+(* Global Instance Embedding_Handshake *)
+(*     : Embedding handshake Handshake := *)
+(*     {| *)
+(*       toAbstract := *)
+(*         fun '(a, b) => *)
+(*           {| *)
+(*             handshakeType := toAbstract a; (* Cryptol sorts the fields *) *)
+(*             messageNumber := toAbstract b; *)
+(*           |} *)
+(*       ; *)
+(*       toConcrete := *)
+(*         fun c => *)
+(*           ( toConcrete (handshakeType c) *)
+(*             , toConcrete (messageNumber c) *)
+(*           ) *)
+(*       ; *)
+(*     |}. *)
+
+(* Global Instance Pointed_Handshake : Pointed Handshake := *)
+(*   {| *)
+(*     pointed := *)
+(*       {| *)
+(*         handshakeType := pointed; *)
+(*         messageNumber := pointed; *)
+(*       |}; *)
+(*   |}. *)

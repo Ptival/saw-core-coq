@@ -20,43 +20,14 @@ From Lift Require Import Lift.HandshakeLift.
 
 From Ornamental Require Import Ornaments.
 
+From Patcher Require Import Patch.
+
 From S2N Require Import S2N.
 
 Set DEVOID search prove equivalence.
 Set DEVOID lift type.
 
 Import CryptolPrimitives.
-
-Module ConnectionAccessors.
-
-  Definition get_client_auth_flag (c : Connection.connection) : bool :=
-    fst c.
-
-  Definition get_corked (c : Connection.connection) : seq 2 bool :=
-    fst (snd c).
-
-  Definition get_corked_IO (c : Connection.connection) : seq 8 bool :=
-    fst (snd (snd c)).
-
-  Definition get_handshake (c : Connection.connection) : Handshake.handshake :=
-    fst (snd (snd (snd c))).
-
-  (* Definition get_is_caching_enabled (c : connection) : bool := *)
-  (*   fst (snd (snd (snd (snd c)))). *)
-
-  (* Definition get_key_exchange_EPH (c : connection) : bool := *)
-  (*   fst (snd (snd (snd (snd (snd c))))). *)
-
-  (* Definition get_mode (c : connection) : seq 32 bool := *)
-  (*   fst (snd (snd (snd (snd (snd (snd c)))))). *)
-
-  (* Definition get_resume_from_cache (c : connection) : bool := *)
-  (*   fst (snd (snd (snd (snd (snd (snd (snd c))))))). *)
-
-  (* Definition get_server_can_send_ocsp (c : connection) : bool := *)
-  (*   snd (snd (snd (snd (snd (snd (snd (snd c))))))). *)
-
-End ConnectionAccessors.
 
 Module ConnectionRecord.
 
@@ -80,20 +51,23 @@ Module ConnectionRecord.
 
 End ConnectionRecord.
 
-Preprocess Module ConnectionAccessors
-  as ConnectionAccessorsPP
-       { opaque
-           Handshake.handshake
-           fst snd
-           natToNat
-           seq
-     }.
+Lift Handshake.handshake
+     HandshakePP.Handshake
+  in ConnectionPP.connection
+  as connection'
+       { opaque seq }.
+
+Lift HandshakePP.handshake
+     HandshakePP.Handshake
+  in ConnectionPP.get_corked
+  as getCorked
+       { opaque seq }.
 
 Preprocess Module ConnectionRecord
   as ConnectionRecordPP0
        { opaque
            Handshake.handshake
-           fst snd
+           (* fst snd *)
            natToNat
            seq
      }.
@@ -145,32 +119,6 @@ Lift ConnectionPPconnection
        { opaque ecMinus PArithSeqBool ecNumber PLiteralSeqBool
        }.
 
-Definition cork (c : ConnectionRecordPP0.Connection) : ConnectionRecordPP0.Connection :=
-  {|
-  ConnectionRecordPP0.clientAuthFlag    := ConnectionRecordPP0.clientAuthFlag c;
-  ConnectionRecordPP0.corked            := s2nCork c;
-  ConnectionRecordPP0.corkedIO          := ConnectionRecordPP0.corkedIO c;
-  ConnectionRecordPP0.handshake         := ConnectionRecordPP0.handshake c;
-  ConnectionRecordPP0.isCachingEnabled  := ConnectionRecordPP0.isCachingEnabled c;
-  ConnectionRecordPP0.keyExchangeEPH    := ConnectionRecordPP0.keyExchangeEPH c;
-  ConnectionRecordPP0.mode              := ConnectionRecordPP0.mode c;
-  ConnectionRecordPP0.resumeFromCache   := ConnectionRecordPP0.resumeFromCache c;
-  ConnectionRecordPP0.serverCanSendOCSP := ConnectionRecordPP0.serverCanSendOCSP c;
-  |}.
-
-Definition uncork (c : ConnectionRecordPP0.Connection) : ConnectionRecordPP0.Connection :=
-  {|
-  ConnectionRecordPP0.clientAuthFlag    := ConnectionRecordPP0.clientAuthFlag c;
-  ConnectionRecordPP0.corked            := s2nUncork c;
-  ConnectionRecordPP0.corkedIO          := ConnectionRecordPP0.corkedIO c;
-  ConnectionRecordPP0.handshake         := ConnectionRecordPP0.handshake c;
-  ConnectionRecordPP0.isCachingEnabled  := ConnectionRecordPP0.isCachingEnabled c;
-  ConnectionRecordPP0.keyExchangeEPH    := ConnectionRecordPP0.keyExchangeEPH c;
-  ConnectionRecordPP0.mode              := ConnectionRecordPP0.mode c;
-  ConnectionRecordPP0.resumeFromCache   := ConnectionRecordPP0.resumeFromCache c;
-  ConnectionRecordPP0.serverCanSendOCSP := ConnectionRecordPP0.serverCanSendOCSP c;
-  |}.
-
 Module CorkTheoremLow.
 
   Definition justCork
@@ -194,17 +142,44 @@ Module CorkTheoremLow.
     reflexivity.
   Defined.
 
-  Theorem cork_theorem_low : forall c,
-    ConnectionAccessors.get_corked c = bvNat 2 0 ->
-    S2N'.s2n_cork c = bvNat 2 1.
+  Lemma lemma_2:
+    forall (b : bool) (s : seq 2 bool) (s0 : seq 8 bool) (h : Handshake.handshake)
+           (b0 b1 : bool) (s1 : seq 32 bool) (b2 b3 : bool),
+      s = joinLSB (joinLSB (nil bool) false) false ->
+      S2N'.s2n_cork (b, (s, (s0, (h, (b0, (b1, (s1, (b2, b3))))))))
+      = joinLSB (joinLSB (nil bool) false) true.
   Proof.
-    intros [? [? [? [? [? [? [? [? ?]]]]]]]].
-    simpl.
-    unfold ConnectionAccessors.get_corked.
-    simpl.
+    intros b s s0 h b0 b1 s1 b2 b3.
     intros.
     subst s.
     apply lemma_1.
+  Defined.
+
+  Definition lemma_3_type :=
+    forall (b : bool) (s : seq 2 bool) (s0 : seq 8 bool) (h : Handshake.handshake)
+           (b0 b1 : bool) (s1 : seq 32 bool) (b2 b3 : bool),
+      ConnectionAccessors.get_corked (b, (s, (s0, (h, (b0, (b1, (s1, (b2, b3))))))))
+      = joinLSB (joinLSB (nil bool) false) false ->
+      S2N'.s2n_cork (b, (s, (s0, (h, (b0, (b1, (s1, (b2, b3))))))))
+      = joinLSB (joinLSB (nil bool) false) true.
+
+  Lemma lemma_3 : lemma_3_type.
+  Proof.
+    intros b s s0 h b0 b1 s1 b2 b3.
+    unfold ConnectionAccessors.get_corked.
+    simpl.
+    apply lemma_2.
+  Defined.
+
+  Definition cork_theorem_low_type := forall c,
+    ConnectionAccessors.get_corked c = bvNat 2 0 ->
+    S2N'.s2n_cork c = bvNat 2 1.
+
+  Theorem cork_theorem_low : cork_theorem_low_type.
+  Proof.
+    intros [? [? [? [? [? [? [? [? ?]]]]]]]].
+    simpl.
+    apply lemma_3.
   Defined.
 
 End CorkTheoremLow.
@@ -227,8 +202,6 @@ Lift HandshakePP.handshake
 Definition two := 2.
 Definition eight := 8.
 Definition thirtyTwo := 32.
-
-From Patcher Require Import Patch.
 
 Replace Convertible Module
         two eight thirtyTwo
@@ -262,7 +235,6 @@ Lift HandshakePP.handshake
            CoreRecords.pm_Leaf
            CoreRecords.record_get
            CoreRecords.string_to_p
-           Datatypes.snd
            Logic.eq_refl
            Notation.Rget
            PArithWord
@@ -300,10 +272,9 @@ Lift HandshakePP.handshake
 
 Lift HandshakePP.handshake
      HandshakeRecordPP.Handshake
-  in CorkTheoremLowPP'.cork_theorem_low
-  as CorkTheoremLow_cork_theorem_low_0
+  in CorkTheoremLowPP'.lemma_2
+  as CorkTheoremLow_lemma_2_0
        { opaque
-
            Ascii.Ascii
            BinNums.xI
            BinNums.xO
@@ -316,7 +287,6 @@ Lift HandshakePP.handshake
            CoreRecords.pm_Leaf
            CoreRecords.record_get
            CoreRecords.string_to_p
-           Datatypes.snd
            Logic.eq_refl
            Notation.Rget
            PArithWord
@@ -345,11 +315,288 @@ Lift HandshakePP.handshake
            spec.toNat
            thirtyTwo
            two
+       }.
 
-           (* those should probably be transparent in the real one *)
-           (* S2N'.s2n_cork *)
-           (* prod *)
+Lift ConnectionPPconnection
+     ConnectionRecordPP0.Connection
+  in CorkTheoremLow_lemma_2_0
+  as CorkTheoremLow_lemma_2_1
+       { opaque
+           Ascii.Ascii
+           BinNums.xI
+           BinNums.xO
+           Bool
+           CoreRecords.FScons
+           CoreRecords.field
+           CoreRecords.Fields
+           CoreRecords.get_member
+           CoreRecords.pm_Branch
+           CoreRecords.pm_Leaf
+           CoreRecords.record_get
+           CoreRecords.string_to_p
+           Logic.eq_refl
+           Notation.Rget
+           PArithWord
+           PLiteralSeqBool
+           String.EmptyString
+           String.String
+           TCNum
+           bitvector
+           bool
+           bvAdd
+           bvNat
+           bvToBITS
+           cons
+           ecNumber
+           ecPlus
+           eight
+           half
+           joinLSB
+           nil
+           odd
+           operations.adcB
+           prod
+           seq
+           shiftin
+           spec.BITS
+           spec.toNat
+           thirtyTwo
+           two
+       }.
 
+Lift HandshakePP.handshake
+     HandshakeRecordPP.Handshake
+  in CorkTheoremLowPP'.lemma_3_type
+  as CorkTheoremLow_lemma_3_type_0
+       { opaque
+           Ascii.Ascii
+           BinNums.xI
+           BinNums.xO
+           Bool
+           CoreRecords.FScons
+           CoreRecords.field
+           CoreRecords.Fields
+           CoreRecords.get_member
+           CoreRecords.pm_Branch
+           CoreRecords.pm_Leaf
+           CoreRecords.record_get
+           CoreRecords.string_to_p
+           Logic.eq_refl
+           Notation.Rget
+           PArithWord
+           PLiteralSeqBool
+           String.EmptyString
+           String.String
+           TCNum
+           bitvector
+           bool
+           bvAdd
+           bvNat
+           bvToBITS
+           cons
+           ecNumber
+           ecPlus
+           eight
+           half
+           joinLSB
+           nil
+           odd
+           operations.adcB
+           prod
+           seq
+           shiftin
+           spec.BITS
+           spec.toNat
+           thirtyTwo
+           two
+       }.
+
+Lift ConnectionPPconnection
+     ConnectionRecordPP0.Connection
+  in CorkTheoremLow_lemma_3_type_0
+  as CorkTheoremLow_lemma_3_type_1
+       { opaque
+           Ascii.Ascii
+           BinNums.xI
+           BinNums.xO
+           Bool
+           CoreRecords.FScons
+           CoreRecords.field
+           CoreRecords.Fields
+           CoreRecords.get_member
+           CoreRecords.pm_Branch
+           CoreRecords.pm_Leaf
+           CoreRecords.record_get
+           CoreRecords.string_to_p
+           Logic.eq_refl
+           Notation.Rget
+           PArithWord
+           PLiteralSeqBool
+           String.EmptyString
+           String.String
+           TCNum
+           bitvector
+           bool
+           bvAdd
+           bvNat
+           bvToBITS
+           cons
+           ecNumber
+           ecPlus
+           eight
+           half
+           joinLSB
+           nil
+           odd
+           operations.adcB
+           prod
+           seq
+           shiftin
+           spec.BITS
+           spec.toNat
+           thirtyTwo
+           two
+       }.
+
+Lift HandshakePP.handshake
+     HandshakeRecordPP.Handshake
+  in CorkTheoremLowPP'.lemma_3
+  as CorkTheoremLow_lemma_3_0
+       { opaque
+           Ascii.Ascii
+           BinNums.xI
+           BinNums.xO
+           Bool
+           CoreRecords.FScons
+           CoreRecords.field
+           CoreRecords.Fields
+           CoreRecords.get_member
+           CoreRecords.pm_Branch
+           CoreRecords.pm_Leaf
+           CoreRecords.record_get
+           CoreRecords.string_to_p
+           Logic.eq_refl
+           Notation.Rget
+           PArithWord
+           PLiteralSeqBool
+           String.EmptyString
+           String.String
+           TCNum
+           bitvector
+           bool
+           bvAdd
+           bvNat
+           bvToBITS
+           cons
+           ecNumber
+           ecPlus
+           eight
+           half
+           joinLSB
+           nil
+           odd
+           operations.adcB
+           prod
+           seq
+           shiftin
+           spec.BITS
+           spec.toNat
+           thirtyTwo
+           two
+       }.
+
+Lift ConnectionPPconnection
+     ConnectionRecordPP0.Connection
+  in CorkTheoremLow_lemma_3_0
+  as CorkTheoremLow_lemma_3_1
+       { opaque
+           Ascii.Ascii
+           BinNums.xI
+           BinNums.xO
+           Bool
+           CoreRecords.FScons
+           CoreRecords.field
+           CoreRecords.Fields
+           CoreRecords.get_member
+           CoreRecords.pm_Branch
+           CoreRecords.pm_Leaf
+           CoreRecords.record_get
+           CoreRecords.string_to_p
+           Logic.eq_refl
+           Notation.Rget
+           PArithWord
+           PLiteralSeqBool
+           String.EmptyString
+           String.String
+           TCNum
+           bitvector
+           bool
+           bvAdd
+           bvNat
+           bvToBITS
+           cons
+           ecNumber
+           ecPlus
+           eight
+           half
+           joinLSB
+           nil
+           odd
+           operations.adcB
+           prod
+           seq
+           shiftin
+           spec.BITS
+           spec.toNat
+           thirtyTwo
+           two
+       }.
+
+Lift HandshakePP.handshake
+     HandshakeRecordPP.Handshake
+  in CorkTheoremLowPP'.cork_theorem_low
+  as CorkTheoremLow_cork_theorem_low_0
+       { opaque
+           Ascii.Ascii
+           BinNums.xI
+           BinNums.xO
+           Bool
+           CoreRecords.FScons
+           CoreRecords.field
+           CoreRecords.Fields
+           CoreRecords.get_member
+           CoreRecords.pm_Branch
+           CoreRecords.pm_Leaf
+           CoreRecords.record_get
+           CoreRecords.string_to_p
+           Logic.eq_refl
+           Notation.Rget
+           PArithWord
+           PLiteralSeqBool
+           String.EmptyString
+           String.String
+           TCNum
+           bitvector
+           bool
+           bvAdd
+           bvNat
+           bvToBITS
+           cons
+           ecNumber
+           ecPlus
+           eight
+           half
+           joinLSB
+           nil
+           odd
+           operations.adcB
+           prod
+           seq
+           shiftin
+           spec.BITS
+           spec.toNat
+           thirtyTwo
+           two
        }.
 
 Lift ConnectionPPconnection
@@ -375,7 +622,6 @@ Lift ConnectionPPconnection
            CoreRecords.pm_Leaf
            CoreRecords.record_get
            CoreRecords.string_to_p
-           Datatypes.snd
            Logic.eq_refl
            Notation.Rget
            PArithWord
@@ -415,7 +661,7 @@ Lift ConnectionPPconnection
 
 Lift ConnectionPPconnection
      ConnectionRecordPP0.Connection
-  in CorkTheoremLow_cork_theorem_low_0
+  in CorkTheoremLow_cork_theorem_low_type
   as CorkTheoremLow_cork_theorem_low_1
        { opaque
 
